@@ -68,9 +68,13 @@ function init_config {
 }
 
 function generate_certificates {
-    openssl genrsa -out ca-key.pem 2048
-    openssl req -x509 -new -nodes -key ca-key.pem -days 10000 -out ca.pem -subj "/CN=kube-ca"
+    if [ ! -f ca-key.pem ]; then
+        openssl genrsa -out ca-key.pem 2048
+    fi
 
+    if [ ! -f ca.pem ]; then
+        openssl req -x509 -new -nodes -key ca-key.pem -days 10000 -out ca.pem -subj "/CN=kube-ca"
+    fi
         local TEMPLATE=openssl.cnf
     if [ ! -f $TEMPLATE ]; then
         echo "TEMPLATE: $TEMPLATE"
@@ -94,10 +98,18 @@ IP.2 = ${ADVERTISE_IP}
 EOF
     fi
 
-    openssl genrsa -out apiserver-key.pem 2048
-    openssl req -new -key apiserver-key.pem -out apiserver.csr -subj "/CN=kube-apiserver" -config openssl.cnf
-    openssl x509 -req -in apiserver.csr -CA ca.pem -CAkey ca-key.pem -CAcreateserial -out apiserver.pem -days 365 -extensions v3_req -extfile openssl.cnf
+    if [ ! -f apiserver-key.pem ]; then
+        openssl genrsa -out apiserver-key.pem 2048
+    fi
 
+    if [ ! -f apiserver.csr ]; then
+        openssl req -new -key apiserver-key.pem -out apiserver.csr -subj "/CN=kube-apiserver" -config openssl.cnf
+    fi
+    
+    if [ ! -f apiserver.pem ]; then
+        openssl x509 -req -in apiserver.csr -CA ca.pem -CAkey ca-key.pem -CAcreateserial -out apiserver.pem -days 365 -extensions v3_req -extfile openssl.cnf
+    fi
+    
     mkdir -p /etc/kubernetes/ssl/
     cp apiserver.pem /etc/kubernetes/ssl
     cp apiserver-key.pem /etc/kubernetes/ssl/
