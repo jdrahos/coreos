@@ -6,6 +6,8 @@
 export MASTER_HOST=
 # version of kubernetes/kubectl to install
 export K8S_VER=v1.5.2
+# version of helm to use
+export HELM_VER=v2.1.3
 # name of the cluster in kubectl configs
 export CLUSTER_NAME=default
 # certification authority certificate file
@@ -20,7 +22,7 @@ export ADMIN_CERT=admin.pem
 export KUBE_CONFIG_DIR=~/.kube/${CLUSTER_NAME}
 
 function init_config {
-    local REQUIRED=( 'MASTER_HOST' 'K8S_VER' 'CLUSTER_NAME' 'CA_CERT' 'CA_KEY' 'ADMIN_KEY' 'ADMIN_CERT' 'KUBE_CONFIG_DIR' )
+    local REQUIRED=( 'MASTER_HOST' 'K8S_VER' 'HELM_VER' 'CLUSTER_NAME' 'CA_CERT' 'CA_KEY' 'ADMIN_KEY' 'ADMIN_CERT' 'KUBE_CONFIG_DIR' )
 
     for REQ in "${REQUIRED[@]}"; do
         if [ -z "$(eval echo \$$REQ)" ]; then
@@ -64,7 +66,7 @@ function install_kubectl {
     if [ ! -f /usr/local/bin/kubectl ]; then
         curl -O https://storage.googleapis.com/kubernetes-release/release/$K8S_VER/bin/linux/amd64/kubectl
         chmod +x kubectl
-        mv kubectl /usr/local/bin/kubectl
+        sudo mv kubectl /usr/local/bin/kubectl
     fi
 
 
@@ -74,6 +76,20 @@ function install_kubectl {
     kubectl config use-context ${CLUSTER_NAME}-system
 }
 
+function install_helm {
+    if [ ! -f /usr/local/bin/helm ]; then
+        wget https://kubernetes-helm.storage.googleapis.com/helm-${HELM_VER}-linux-amd64.tar.gz
+        tar -zxvf helm-${HELM_VER}-linux-amd64.tar.gz
+        chmod +x linux-amd64/helm
+        sudo mv linux-amd64/helm /usr/local/bin/helm
+        rm -rf linux-amd64
+        rm helm-${HELM_VER}-linux-amd64.tar.gz
+    fi
+
+    helm init
+}
+
 init_config
 generate_certificates
 install_kubectl
+install_helm
