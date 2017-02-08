@@ -1,4 +1,5 @@
 #!/bin/bash
+#script based on https://github.com/coreos/coreos-kubernetes/blob/master/multi-node/generic/worker-install.sh
 set -e
 
 #set to name of the network interface to use
@@ -387,9 +388,9 @@ init_templates
 chmod +x /opt/bin/host-rkt
 systemctl stop update-engine; systemctl mask update-engine
 systemctl daemon-reload
+systemctl enable docker;
 systemctl enable flanneld;
 systemctl enable kubelet;
-systemctl enable docker;
 
 if [ $CONTAINER_RUNTIME = "rkt" ]; then
         systemctl enable load-rkt-stage1
