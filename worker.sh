@@ -102,8 +102,8 @@ EOF
     fi
 
     mkdir -p /etc/kubernetes/ssl/
-    cp ${FQDN}-worker.pem /etc/kubernetes/ssl
-    cp ${FQDN}-worker-key.pem /etc/kubernetes/ssl/
+    cp ${FQDN}-worker.pem /etc/kubernetes/ssl/worker.pem
+    cp ${FQDN}-worker-key.pem /etc/kubernetes/ssl/worker-key.pem
     cp ca.pem /etc/kubernetes/ssl/
 
     chmod 600 /etc/kubernetes/ssl/*-key.pem
@@ -387,8 +387,9 @@ init_templates
 chmod +x /opt/bin/host-rkt
 systemctl stop update-engine; systemctl mask update-engine
 systemctl daemon-reload
-systemctl enable flanneld; systemctl start flanneld
-systemctl enable kubelet; systemctl start kubelet
+systemctl enable flanneld;
+systemctl enable kubelet;
+systemctl enable docker;
 
 if [ $CONTAINER_RUNTIME = "rkt" ]; then
         systemctl enable load-rkt-stage1
