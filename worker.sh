@@ -1,6 +1,15 @@
 #!/bin/bash
 set -e
 
+#set to name of the network interface to use
+export NIC=enp0s8
+
+# set to routable host ip. By default use current IP
+export ADVERTISE_IP=$(ifconfig $NIC | grep 'inet ' | awk '{print $2}')
+
+# set to fully qualified hostname. Uses current hostname by default
+export FQDN=$(hostname)
+
 # List of etcd servers (http://ip:port), comma separated
 export ETCD_ENDPOINTS=
 
@@ -24,27 +33,16 @@ export POD_NETWORK=10.2.0.0/16
 # This must be the same DNS_SERVICE_IP used when configuring the controller nodes.
 export DNS_SERVICE_IP=10.3.0.10
 
-# Whether to use Calico for Kubernetes network policy.
-export USE_CALICO=false
-
 # Determines the container runtime for kubernetes to use. Accepts 'docker' or 'rkt'.
 export CONTAINER_RUNTIME=docker
 
 # The above settings can optionally be overridden using an environment file:
 ENV_FILE=/run/coreos-kubernetes/options.env
 
-# To run a self hosted Calico install it needs to be able to write to the CNI dir
-if [ "${USE_CALICO}" = "true" ]; then
-    export CALICO_OPTS="--volume cni-bin,kind=host,source=/opt/cni/bin \
-                        --mount volume=cni-bin,target=/opt/cni/bin"
-else
-    export CALICO_OPTS=""
-fi
-
 # -------------
 
 function init_config {
-    local REQUIRED=( 'ADVERTISE_IP' 'ETCD_ENDPOINTS' 'CONTROLLER_ENDPOINT' 'DNS_SERVICE_IP' 'K8S_VER' 'HYPERKUBE_IMAGE_REPO' 'USE_CALICO' )
+    local REQUIRED=( 'ADVERTISE_IP' 'ETCD_ENDPOINTS' 'CONTROLLER_ENDPOINT' 'DNS_SERVICE_IP' 'K8S_VER' 'HYPERKUBE_IMAGE_REPO' 'NIC' )
 
     if [ -f $ENV_FILE ]; then
         export $(cat $ENV_FILE | xargs)
@@ -62,13 +60,86 @@ function init_config {
     done
 }
 
+function generate_certificates {
+    if [ ! -f ca-key.pem ]; then
+        echo "Missing key file: ca-key.pem"
+        exit 1
+    fi
+
+    if [ ! -f ca.pem ]; then
+        echo "Missing certificate file: ca.pem"
+        exit 1
+    fi
+
+    if [ ! -f ${FQDN}-worker-key.pem ]; then
+        openssl genrsa -out ${FQDN}-worker-key.pem 2048
+    fi
+
+        local TEMPLATE=worker-openssl.cnf
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+[req]
+req_extensions = v3_req
+distinguished_name = req_distinguished_name
+[req_distinguished_name]
+[ v3_req ]
+basicConstraints = CA:FALSE
+keyUsage = nonRepudiation, digitalSignature, keyEncipherment
+subjectAltName = @alt_names
+[alt_names]
+IP.1 = ${ADVERTISE_IP}
+EOF
+    fi
+
+    if [ ! -f ${FQDN}-worker.csr ]; then
+        ADVERTISE_IP=${ADVERTISE_IP} openssl req -new -key ${FQDN}-worker-key.pem -out ${FQDN}-worker.csr -subj "/CN=${FQDN}" -config worker-openssl.cnf
+    fi
+
+    if [ ! -f apiserver-key.pem ]; then
+        ADVERTISE_IP=${ADVERTISE_IP} openssl x509 -req -in ${FQDN}-worker.csr -CA ca.pem -CAkey ca-key.pem -CAcreateserial -out ${FQDN}-worker.pem -days 365 -extensions v3_req -extfile worker-openssl.cnf
+    fi
+
+    mkdir -p /etc/kubernetes/ssl/
+    cp ${FQDN}-worker.pem /etc/kubernetes/ssl
+    cp ${FQDN}-worker-key.pem /etc/kubernetes/ssl/
+    cp ca.pem /etc/kubernetes/ssl/
+
+    chmod 600 /etc/kubernetes/ssl/*-key.pem
+    chown root:root /etc/kubernetes/ssl/*.pem
+}
+
 function init_templates {
+    local gatewayIp=$(route -n | grep $NIC | grep G | awk '{print $2}')
+    local dnsConfig=$(for dns in `grep nameserver /etc/resolv.conf | awk '{print $2}'`; do echo "DNS=$dns"; done)
+    local TEMPLATE=/etc/systemd/network/static.network
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+[Match]
+Name=$NIC
+
+[Network]
+Address= $ADVERTISE_IP/24
+Gateway=${gatewayIp}
+${dnsConfig}
+
+EOF
+    fi
+    
     local TEMPLATE=/etc/systemd/system/kubelet.service
     local uuid_file="/var/run/kubelet-pod.uuid"
     if [ ! -f $TEMPLATE ]; then
         echo "TEMPLATE: $TEMPLATE"
         mkdir -p $(dirname $TEMPLATE)
         cat << EOF > $TEMPLATE
+[Unit]
+Description=Kubernetes node agent
+After=docker.service flanneld.service
+Before=flannel-docker-opts.service
+Wants=flannel-docker-opts.service
 [Service]
 Environment=KUBELET_VERSION=${K8S_VER}
 Environment=KUBELET_ACI=${HYPERKUBE_IMAGE_REPO}
@@ -258,7 +329,7 @@ FLANNELD_ETCD_ENDPOINTS=$ETCD_ENDPOINTS
 EOF
     fi
 
-    local TEMPLATE=/etc/systemd/system/flanneld.service.d/40-ExecStartPre-symlink.conf.conf
+    local TEMPLATE=/etc/systemd/system/flanneld.service.d/40-ExecStartPre-symlink.conf
     if [ ! -f $TEMPLATE ]; then
         echo "TEMPLATE: $TEMPLATE"
         mkdir -p $(dirname $TEMPLATE)
@@ -293,7 +364,7 @@ EOF
     fi
 
     local TEMPLATE=/etc/kubernetes/cni/net.d/10-flannel.conf
-    if [ "${USE_CALICO}" = "false" ] && [ ! -f "${TEMPLATE}" ]; then
+    if [ ! -f "${TEMPLATE}" ]; then
         echo "TEMPLATE: $TEMPLATE"
         mkdir -p $(dirname $TEMPLATE)
         cat << EOF > $TEMPLATE
@@ -310,20 +381,23 @@ EOF
 }
 
 init_config
+generate_certificates
 init_templates
 
 chmod +x /opt/bin/host-rkt
-
 systemctl stop update-engine; systemctl mask update-engine
-
 systemctl daemon-reload
+systemctl enable flanneld; systemctl start flanneld
+systemctl enable kubelet; systemctl start kubelet
 
 if [ $CONTAINER_RUNTIME = "rkt" ]; then
         systemctl enable load-rkt-stage1
         systemctl enable rkt-api
 fi
 
-systemctl enable flanneld; systemctl start flanneld
 
+echo "DONE"
+echo "Going to reboot in 10 seconds"
 
-systemctl enable kubelet; systemctl start kubelet
+sleep 10
+reboot
