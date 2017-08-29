@@ -5,9 +5,9 @@
 # ip of the master
 export MASTER_HOST=10.201.12.37
 # version of kubernetes/kubectl to install
-export K8S_VER=v1.5.2
+export K8S_VER=v1.7.4
 # version of helm to use
-export HELM_VER=v2.1.3
+export HELM_VER=v2.6.0
 # name of the cluster in kubectl configs
 export CLUSTER_NAME=default
 # certification authority certificate file
@@ -90,6 +90,6 @@ function install_helm {
 }
 
 init_config
-generate_certificates
-#install_kubectl
-#install_helm
+#generate_certificates
+install_kubectl
+install_helm
