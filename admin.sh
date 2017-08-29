@@ -3,7 +3,7 @@
 # installs kubectl if not present in /usr/local/bin and sets it up to use the cluster
 
 # ip of the master
-export MASTER_HOST=
+export MASTER_HOST=10.201.12.37
 # version of kubernetes/kubectl to install
 export K8S_VER=v1.5.2
 # version of helm to use
@@ -33,33 +33,33 @@ function init_config {
 }
 
 function generate_certificates {
-    if [ ! -f ca-key.pem ]; then
-        echo "Missing key file: ca-key.pem"
+    if [ ! -f "$CA_KEY" ]; then
+        echo "Missing key file: $CA_KEY.pem"
         exit 1
     fi
 
-    if [ ! -f ca.pem ]; then
-        echo "Missing certificate file: ca.pem"
+    if [ ! -f "$CA_CERT" ]; then
+        echo "Missing certificate file: $CA_CERT"
         exit 1
     fi
 
-    if [ ! -f admin-key.pem ]; then
-        openssl genrsa -out admin-key.pem 2048
+    if [ ! -f "$ADMIN_KEY" ]; then
+        openssl genrsa -out "$ADMIN_KEY" 2048
     fi
 
     if [ ! -f admin.csr ]; then
-        openssl req -new -key admin-key.pem -out admin.csr -subj "/CN=kube-admin"
+        openssl req -new -key "$ADMIN_KEY" -out admin.csr -subj "/CN=kube-admin/O=system:masters"
     fi
 
-    if [ ! -f admin.pem ]; then
-        openssl x509 -req -in admin.csr -CA ca.pem -CAkey ca-key.pem -CAcreateserial -out admin.pem -days 365
+    if [ ! -f "$ADMIN_CERT" ]; then
+        openssl x509 -req -in admin.csr -CA "$CA_CERT" -CAkey "$CA_KEY" -CAcreateserial -out "$ADMIN_CERT" -days 365
     fi
 
     #place the certificates and key to the cluster config directory
-    mkdir -p ${KUBE_CONFIG_DIR}
-    cp ca.pem ${KUBE_CONFIG_DIR}
-    cp admin-key.pem ${KUBE_CONFIG_DIR}
-    cp admin.pem ${KUBE_CONFIG_DIR}
+    mkdir -p "$KUBE_CONFIG_DIR"
+    cp "$CA_CERT" "$KUBE_CONFIG_DIR"
+    cp "$ADMIN_KEY" "$KUBE_CONFIG_DIR"
+    cp "$ADMIN_CERT" "$KUBE_CONFIG_DIR"
 }
 
 function install_kubectl {
@@ -70,20 +70,20 @@ function install_kubectl {
     fi
 
 
-    kubectl config set-cluster ${CLUSTER_NAME}-cluster --server=https://${MASTER_HOST} --certificate-authority=${KUBE_CONFIG_DIR}/${CA_CERT}
-    kubectl config set-credentials ${CLUSTER_NAME}-admin --certificate-authority=${KUBE_CONFIG_DIR}/${CA_CERT} --client-key=${KUBE_CONFIG_DIR}/${ADMIN_KEY} --client-certificate=${KUBE_CONFIG_DIR}/${ADMIN_CERT}
-    kubectl config set-context ${CLUSTER_NAME}-system --cluster=${CLUSTER_NAME}-cluster --user=${CLUSTER_NAME}-admin
-    kubectl config use-context ${CLUSTER_NAME}-system
+    kubectl config set-cluster "$CLUSTER_NAME"-cluster --server=https://"$MASTER_HOST" --certificate-authority="$KUBE_CONFIG_DIR"/"$CA_CERT"
+    kubectl config set-credentials "$CLUSTER_NAME"-admin --certificate-authority="$KUBE_CONFIG_DIR"/"$CA_CERT" --client-key="$KUBE_CONFIG_DIR"/"$ADMIN_KEY" --client-certificate="$KUBE_CONFIG_DIR"/"$ADMIN_CERT"
+    kubectl config set-context "$CLUSTER_NAME"-system --cluster="$CLUSTER_NAME"-cluster --user="$CLUSTER_NAME"-admin
+    kubectl config use-context "$CLUSTER_NAME"-system
 }
 
 function install_helm {
     if [ ! -f /usr/local/bin/helm ]; then
-        wget https://kubernetes-helm.storage.googleapis.com/helm-${HELM_VER}-linux-amd64.tar.gz
-        tar -zxvf helm-${HELM_VER}-linux-amd64.tar.gz
+        wget https://kubernetes-helm.storage.googleapis.com/helm-"$HELM_VER"-linux-amd64.tar.gz
+        tar -zxvf helm-"$HELM_VER"-linux-amd64.tar.gz
         chmod +x linux-amd64/helm
         sudo mv linux-amd64/helm /usr/local/bin/helm
         rm -rf linux-amd64
-        rm helm-${HELM_VER}-linux-amd64.tar.gz
+        rm helm-"$HELM_VER"-linux-amd64.tar.gz
     fi
 
     helm init
@@ -91,5 +91,5 @@ function install_helm {
 
 init_config
 generate_certificates
-install_kubectl
-install_helm
+#install_kubectl
+#install_helm
